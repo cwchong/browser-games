@@ -1,0 +1,1163 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>RECON: Zero Day</title>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { background: #1a1a2e; display: flex; align-items: center; justify-content: center; height: 100vh; overflow: hidden; }
+canvas { display: block; image-rendering: pixelated; cursor: none; }
+</style>
+</head>
+<body>
+<canvas id="gameCanvas" width="800" height="600"></canvas>
+<script>
+// ============================================================
+// SECTION 1: CONSTANTS & CONFIG
+// ============================================================
+const CANVAS_W = 800, CANVAS_H = 600;
+const PLAYER_SPEED = 2.8, PLAYER_MAX_HP = 100;
+const BULLET_SPEED = 9, BULLET_DAMAGE = 10, SHOOT_COOLDOWN = 12, BULLET_LIFETIME = 90;
+const ANIM_SPEED = 6;
+const PLAYER_SCALE = 2, GRUNT_SCALE = 2, BRUTE_SCALE = 2, SCOUT_SCALE = 2;
+const GRUNT_SPEED=1.2, GRUNT_HP=30, GRUNT_DMG=8, GRUNT_SCORE=10, GRUNT_RADIUS=10;
+const BRUTE_SPEED=0.7, BRUTE_HP=80, BRUTE_DMG=20, BRUTE_SCORE=25, BRUTE_RADIUS=16;
+const SCOUT_SPEED=2.2, SCOUT_HP=15, SCOUT_DMG=5, SCOUT_SCORE=15, SCOUT_RADIUS=8;
+const PLAYER_RADIUS = 12;
+const DEATH_ANIM_FRAMES = 4;
+const STATES = { MENU:'menu', PLAYING:'playing', LEVEL_COMPLETE:'levelComplete', GAME_OVER:'gameOver' };
+
+// ============================================================
+// SECTION 2: COLOR PALETTE
+// ============================================================
+const C = {
+  bg:'#1a1a2e', panel:'#16213e', border:'#0f3460',
+  accent:'#e94560', cyan:'#a8dadc', white:'#ffffff',
+  yellow:'#ffe066', orange:'#ff9900',
+  gruntBody:'#4a7c59', gruntDark:'#2d4a35',
+  bruteBody:'#7a3b3b', bruteDark:'#4a1f1f', bruteLight:'#c05050',
+  scoutBody:'#5a4a8a', scoutDark:'#2d2050', scoutLight:'#a08ad0',
+};
+
+// ============================================================
+// SECTION 3: SPRITE DEFINITIONS
+// ============================================================
+// Palette index 0 = transparent
+// Player palette: 1=cyan, 2=darkblue, 3=red(gun), 4=white, 5=yellow(visor)
+const P_PAL = ['transparent', C.cyan, '#0f3460', C.accent, C.white, C.yellow];
+
+// Player walk frames (16x16, faces UP = row 0 is "front/top")
+const SPR_P_WALK = [
+  [ // frame 0: legs apart
+    [0,0,0,0,0,1,1,1,1,1,1,0,0,0,0,0],
+    [0,0,0,0,1,5,5,5,5,5,5,1,0,0,0,0],
+    [0,0,0,0,1,5,5,5,5,5,5,1,0,0,0,0],
+    [0,0,0,0,0,2,2,2,2,2,2,0,0,0,0,0],
+    [0,0,0,3,1,1,2,2,2,2,1,1,0,0,0,0],
+    [0,0,0,3,3,1,2,2,2,2,1,0,0,0,0,0],
+    [0,0,0,0,1,1,2,2,2,2,1,1,0,0,0,0],
+    [0,0,0,0,0,2,2,2,2,2,2,0,0,0,0,0],
+    [0,0,0,0,1,2,2,0,0,2,2,1,0,0,0,0],
+    [0,0,0,0,2,2,0,0,0,0,2,2,0,0,0,0],
+    [0,0,0,2,2,0,0,0,0,0,0,2,2,0,0,0],
+    [0,0,0,1,1,0,0,0,0,0,0,1,1,0,0,0],
+    [0,0,0,2,0,0,0,0,0,0,0,0,2,0,0,0],
+    [0,0,0,2,0,0,0,0,0,0,0,0,2,0,0,0],
+    [0,0,0,1,0,0,0,0,0,0,0,0,1,0,0,0],
+    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+  ],
+  [ // frame 1: legs together
+    [0,0,0,0,0,1,1,1,1,1,1,0,0,0,0,0],
+    [0,0,0,0,1,5,5,5,5,5,5,1,0,0,0,0],
+    [0,0,0,0,1,5,5,5,5,5,5,1,0,0,0,0],
+    [0,0,0,0,0,2,2,2,2,2,2,0,0,0,0,0],
+    [0,0,0,3,1,1,2,2,2,2,1,1,0,0,0,0],
+    [0,0,0,3,3,1,2,2,2,2,1,0,0,0,0,0],
+    [0,0,0,0,1,1,2,2,2,2,1,1,0,0,0,0],
+    [0,0,0,0,0,2,2,2,2,2,2,0,0,0,0,0],
+    [0,0,0,0,1,2,2,0,0,2,2,1,0,0,0,0],
+    [0,0,0,0,2,2,0,0,0,0,2,2,0,0,0,0],
+    [0,0,0,0,2,2,0,0,0,0,2,2,0,0,0,0],
+    [0,0,0,0,1,1,0,0,0,0,1,1,0,0,0,0],
+    [0,0,0,0,2,0,0,0,0,0,0,2,0,0,0,0],
+    [0,0,0,0,2,0,0,0,0,0,0,2,0,0,0,0],
+    [0,0,0,0,1,0,0,0,0,0,0,1,0,0,0,0],
+    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+  ],
+  [ // frame 2: mirror of frame 0
+    [0,0,0,0,0,1,1,1,1,1,1,0,0,0,0,0],
+    [0,0,0,0,1,5,5,5,5,5,5,1,0,0,0,0],
+    [0,0,0,0,1,5,5,5,5,5,5,1,0,0,0,0],
+    [0,0,0,0,0,2,2,2,2,2,2,0,0,0,0,0],
+    [0,0,0,3,1,1,2,2,2,2,1,1,0,0,0,0],
+    [0,0,0,3,3,1,2,2,2,2,1,0,0,0,0,0],
+    [0,0,0,0,1,1,2,2,2,2,1,1,0,0,0,0],
+    [0,0,0,0,0,2,2,2,2,2,2,0,0,0,0,0],
+    [0,0,0,0,1,2,2,0,0,2,2,1,0,0,0,0],
+    [0,0,0,0,2,2,0,0,0,0,2,2,0,0,0,0],
+    [0,0,2,2,0,0,0,0,0,0,0,0,2,2,0,0],
+    [0,0,1,1,0,0,0,0,0,0,0,0,1,1,0,0],
+    [0,0,2,0,0,0,0,0,0,0,0,0,0,2,0,0],
+    [0,0,2,0,0,0,0,0,0,0,0,0,0,2,0,0],
+    [0,0,1,0,0,0,0,0,0,0,0,0,0,1,0,0],
+    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+  ],
+];
+// frame 3 same as frame 1
+SPR_P_WALK.push(SPR_P_WALK[1]);
+
+const SPR_P_DIE = [
+  SPR_P_WALK[0],
+  [ // crumpling
+    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,1,1,1,1,1,0,0,0,0,0,0],
+    [0,0,0,0,1,5,5,5,5,5,1,0,0,0,0,0],
+    [0,0,0,3,1,2,2,2,2,2,1,0,0,0,0,0],
+    [0,0,0,3,3,2,2,2,2,2,0,0,0,0,0,0],
+    [0,0,0,0,2,2,2,2,2,0,0,0,0,0,0,0],
+    [0,0,0,2,2,0,0,0,2,2,0,0,0,0,0,0],
+    [0,0,2,2,0,0,0,0,0,2,2,0,0,0,0,0],
+    [0,0,1,0,0,0,0,0,0,0,1,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+  ],
+  [ // flat
+    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+    [0,0,0,1,1,1,1,1,1,1,1,1,0,0,0,0],
+    [0,0,3,3,2,2,2,2,2,2,2,2,2,0,0,0],
+    [0,0,0,2,2,0,2,2,2,2,0,2,0,0,0,0],
+    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+  ],
+  [ // same as flat
+    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+    [0,0,0,1,1,1,1,1,1,1,1,1,0,0,0,0],
+    [0,0,3,3,2,2,2,2,2,2,2,2,2,0,0,0],
+    [0,0,0,2,2,0,2,2,2,2,0,2,0,0,0,0],
+    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+  ],
+];
+
+// Grunt palette: 1=body, 2=dark, 3=eyes(red)
+const G_PAL = ['transparent', C.gruntBody, C.gruntDark, C.accent];
+const SPR_G_WALK = [
+  [
+    [0,0,0,0,0,2,2,2,2,2,0,0,0,0,0,0],
+    [0,0,0,0,2,1,1,1,1,1,2,0,0,0,0,0],
+    [0,0,0,0,2,1,3,1,3,1,2,0,0,0,0,0],
+    [0,0,0,0,2,1,1,1,1,1,2,0,0,0,0,0],
+    [0,0,0,2,1,1,1,1,1,1,1,2,0,0,0,0],
+    [0,0,0,2,1,1,2,1,2,1,1,2,0,0,0,0],
+    [0,0,0,0,2,1,1,1,1,1,2,0,0,0,0,0],
+    [0,0,0,0,0,2,1,1,1,2,0,0,0,0,0,0],
+    [0,0,2,2,2,1,1,1,1,1,2,2,2,0,0,0],
+    [0,0,2,1,1,0,0,0,0,0,1,1,2,0,0,0],
+    [0,0,0,0,2,1,0,0,0,1,2,0,0,0,0,0],
+    [0,0,0,0,2,1,0,0,0,1,2,0,0,0,0,0],
+    [0,0,0,0,2,2,0,0,0,2,2,0,0,0,0,0],
+    [0,0,0,0,2,0,0,0,0,0,2,0,0,0,0,0],
+    [0,0,0,0,2,0,0,0,0,0,2,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+  ],
+  [
+    [0,0,0,0,0,2,2,2,2,2,0,0,0,0,0,0],
+    [0,0,0,0,2,1,1,1,1,1,2,0,0,0,0,0],
+    [0,0,0,0,2,1,3,1,3,1,2,0,0,0,0,0],
+    [0,0,0,0,2,1,1,1,1,1,2,0,0,0,0,0],
+    [0,0,0,2,1,1,1,1,1,1,1,2,0,0,0,0],
+    [0,0,0,2,1,1,2,1,2,1,1,2,0,0,0,0],
+    [0,0,0,0,2,1,1,1,1,1,2,0,0,0,0,0],
+    [0,0,0,0,0,2,1,1,1,2,0,0,0,0,0,0],
+    [0,0,2,2,2,1,1,1,1,1,2,2,2,0,0,0],
+    [0,0,2,1,1,0,0,0,0,0,1,1,2,0,0,0],
+    [0,0,0,0,2,2,0,0,0,2,2,0,0,0,0,0],
+    [0,0,0,0,0,2,0,0,0,2,0,0,0,0,0,0],
+    [0,0,0,0,0,2,0,0,0,2,0,0,0,0,0,0],
+    [0,0,0,0,0,2,0,0,0,2,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+  ],
+];
+const SPR_G_DIE = [
+  SPR_G_WALK[0],
+  [
+    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,2,2,2,2,2,0,0,0,0,0,0],
+    [0,0,0,0,2,1,3,1,3,1,2,0,0,0,0,0],
+    [0,0,0,2,1,1,1,1,1,1,1,2,0,0,0,0],
+    [0,0,2,1,1,2,1,2,1,1,2,2,2,0,0,0],
+    [0,0,2,1,0,0,0,0,0,0,1,0,0,0,0,0],
+    [0,0,2,2,0,0,0,0,0,2,2,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+  ],
+  [
+    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+    [0,0,0,2,2,2,2,2,2,2,2,0,0,0,0,0],
+    [0,0,2,1,1,3,1,3,1,1,1,2,0,0,0,0],
+    [0,0,2,2,2,1,1,1,1,2,2,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+  ],
+  [
+    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+    [0,0,0,2,2,2,2,2,2,2,2,0,0,0,0,0],
+    [0,0,2,1,1,3,1,3,1,1,1,2,0,0,0,0],
+    [0,0,2,2,2,1,1,1,1,2,2,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+  ],
+];
+
+// Brute palette: 1=body, 2=dark, 3=light
+const B_PAL = ['transparent', C.bruteBody, C.bruteDark, C.bruteLight];
+const SPR_B_WALK = [
+  [ // 16x16 but drawn "larger" via scale — heavy, wide
+    [0,0,2,2,2,2,2,2,2,2,2,2,2,2,0,0],
+    [0,2,1,1,1,1,1,1,1,1,1,1,1,1,2,0],
+    [2,1,3,3,1,1,1,1,1,1,1,1,3,3,1,2],
+    [2,1,1,1,1,2,1,1,1,1,2,1,1,1,1,2],
+    [2,1,1,1,1,1,1,1,1,1,1,1,1,1,1,2],
+    [2,1,1,2,1,1,1,1,1,1,1,1,2,1,1,2],
+    [2,1,1,1,1,1,1,1,1,1,1,1,1,1,1,2],
+    [0,2,1,1,1,1,1,1,1,1,1,1,1,1,2,0],
+    [0,2,1,1,1,1,1,1,1,1,1,1,1,1,2,0],
+    [0,0,2,1,1,1,2,0,0,2,1,1,1,2,0,0],
+    [0,0,0,2,1,2,0,0,0,0,2,1,2,0,0,0],
+    [0,0,0,2,1,2,0,0,0,0,2,1,2,0,0,0],
+    [0,0,0,2,1,2,0,0,0,0,2,1,2,0,0,0],
+    [0,0,0,0,2,0,0,0,0,0,0,2,0,0,0,0],
+    [0,0,0,0,2,0,0,0,0,0,0,2,0,0,0,0],
+    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+  ],
+  [
+    [0,0,2,2,2,2,2,2,2,2,2,2,2,2,0,0],
+    [0,2,1,1,1,1,1,1,1,1,1,1,1,1,2,0],
+    [2,1,3,3,1,1,1,1,1,1,1,1,3,3,1,2],
+    [2,1,1,1,1,2,1,1,1,1,2,1,1,1,1,2],
+    [2,1,1,1,1,1,1,1,1,1,1,1,1,1,1,2],
+    [2,1,1,2,1,1,1,1,1,1,1,1,2,1,1,2],
+    [2,1,1,1,1,1,1,1,1,1,1,1,1,1,1,2],
+    [0,2,1,1,1,1,1,1,1,1,1,1,1,1,2,0],
+    [0,2,1,1,1,1,1,1,1,1,1,1,1,1,2,0],
+    [0,0,2,1,1,1,2,0,0,2,1,1,1,2,0,0],
+    [0,0,0,2,2,2,0,0,0,0,2,2,2,0,0,0],
+    [0,0,0,0,2,0,0,0,0,0,0,2,0,0,0,0],
+    [0,0,0,0,2,0,0,0,0,0,0,2,0,0,0,0],
+    [0,0,0,0,2,0,0,0,0,0,0,2,0,0,0,0],
+    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+  ],
+];
+const SPR_B_DIE = [
+  SPR_B_WALK[0],
+  [
+    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+    [0,0,2,2,2,2,2,2,2,2,2,2,2,0,0,0],
+    [0,2,1,3,3,1,1,1,1,1,1,3,3,1,2,0],
+    [0,2,1,1,2,1,1,1,1,1,2,1,1,1,2,0],
+    [0,2,2,1,1,1,1,1,1,1,1,1,2,2,0,0],
+    [0,0,0,2,2,0,0,0,0,0,2,2,0,0,0,0],
+    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+  ],
+  [
+    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+    [0,2,2,2,2,2,2,2,2,2,2,2,2,2,2,0],
+    [2,1,1,3,1,1,1,1,1,1,1,1,3,1,1,2],
+    [0,2,2,2,2,1,1,1,1,1,2,2,2,2,0,0],
+    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+  ],
+  [
+    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+    [0,2,2,2,2,2,2,2,2,2,2,2,2,2,2,0],
+    [2,1,1,3,1,1,1,1,1,1,1,1,3,1,1,2],
+    [0,2,2,2,2,1,1,1,1,1,2,2,2,2,0,0],
+    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+  ],
+];
+
+// Scout palette: 1=body, 2=dark, 3=light/eye
+const S_PAL = ['transparent', C.scoutBody, C.scoutDark, C.scoutLight];
+const SPR_S_WALK = [
+  [
+    [0,0,0,0,2,2,2,0,0,0,0,0,0,0,0,0],
+    [0,0,0,2,1,1,1,2,0,0,0,0,0,0,0,0],
+    [0,0,2,1,3,1,3,1,2,0,0,0,0,0,0,0],
+    [0,0,2,1,1,1,1,1,2,0,0,0,0,0,0,0],
+    [0,2,1,1,1,1,1,1,1,2,0,0,0,0,0,0],
+    [2,1,1,1,3,1,1,1,1,1,2,0,0,0,0,0],
+    [0,2,1,1,1,1,1,1,1,2,0,0,0,0,0,0],
+    [0,0,2,2,1,1,2,2,0,0,0,0,0,0,0,0],
+    [0,0,0,2,0,0,2,0,0,0,0,0,0,0,0,0],
+    [0,0,0,2,0,0,2,0,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+  ],
+  [
+    [0,0,0,0,2,2,2,0,0,0,0,0,0,0,0,0],
+    [0,0,0,2,1,1,1,2,0,0,0,0,0,0,0,0],
+    [0,0,2,1,3,1,3,1,2,0,0,0,0,0,0,0],
+    [0,0,2,1,1,1,1,1,2,0,0,0,0,0,0,0],
+    [0,2,1,1,1,1,1,1,1,2,0,0,0,0,0,0],
+    [2,1,1,1,3,1,1,1,1,1,2,0,0,0,0,0],
+    [0,2,1,1,1,1,1,1,1,2,0,0,0,0,0,0],
+    [0,0,2,2,1,1,2,2,0,0,0,0,0,0,0,0],
+    [0,0,0,0,2,2,0,0,0,0,0,0,0,0,0,0],
+    [0,0,0,0,2,2,0,0,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+  ],
+];
+const SPR_S_DIE = [
+  SPR_S_WALK[0],
+  [
+    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+    [0,0,0,2,2,2,2,2,2,0,0,0,0,0,0,0],
+    [0,0,2,1,3,1,3,1,1,2,0,0,0,0,0,0],
+    [0,2,1,1,3,1,1,1,1,1,2,0,0,0,0,0],
+    [0,0,2,2,1,1,1,2,2,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+  ],
+  [
+    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+    [0,0,2,2,2,2,2,2,2,2,0,0,0,0,0,0],
+    [0,2,1,1,3,1,3,1,3,1,2,0,0,0,0,0],
+    [0,0,2,2,2,1,1,2,2,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+  ],
+  [
+    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+    [0,0,2,2,2,2,2,2,2,2,0,0,0,0,0,0],
+    [0,2,1,1,3,1,3,1,3,1,2,0,0,0,0,0],
+    [0,0,2,2,2,1,1,2,2,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+  ],
+];
+
+function drawSprite(ctx, frameData, palette, cx, cy, scale, angle) {
+  const rows = frameData.length, cols = frameData[0].length;
+  const hw = cols * scale / 2, hh = rows * scale / 2;
+  ctx.save();
+  ctx.translate(cx, cy);
+  ctx.rotate(angle + Math.PI / 2);
+  for (let r = 0; r < rows; r++) {
+    for (let c = 0; c < cols; c++) {
+      const idx = frameData[r][c];
+      if (!idx) continue;
+      ctx.fillStyle = palette[idx];
+      ctx.fillRect(c * scale - hw, r * scale - hh, scale, scale);
+    }
+  }
+  ctx.restore();
+}
+
+// ============================================================
+// SECTION 4: INPUT MANAGER
+// ============================================================
+const Input = {
+  keys: {},
+  mouseX: CANVAS_W / 2, mouseY: CANVAS_H / 2,
+  mouseDown: false, mouseJustDown: false, mouseJustUp: false,
+  init() {
+    const canvas = document.getElementById('gameCanvas');
+    window.addEventListener('keydown', e => {
+      this.keys[e.key] = true;
+      if (['ArrowUp','ArrowDown','ArrowLeft','ArrowRight',' '].includes(e.key)) e.preventDefault();
+    });
+    window.addEventListener('keyup', e => { this.keys[e.key] = false; });
+    canvas.addEventListener('mousemove', e => {
+      const r = canvas.getBoundingClientRect();
+      const sx = canvas.width / r.width, sy = canvas.height / r.height;
+      this.mouseX = (e.clientX - r.left) * sx;
+      this.mouseY = (e.clientY - r.top) * sy;
+    });
+    canvas.addEventListener('mousedown', () => { this.mouseDown = true; this.mouseJustDown = true; });
+    canvas.addEventListener('mouseup', () => { this.mouseDown = false; this.mouseJustUp = true; });
+  },
+  flush() { this.mouseJustDown = false; this.mouseJustUp = false; }
+};
+
+// ============================================================
+// SECTION 5: PARTICLE SYSTEM
+// ============================================================
+class Particle {
+  constructor(x, y, vx, vy, color, size, lifetime) {
+    this.x = x; this.y = y; this.vx = vx; this.vy = vy;
+    this.color = color; this.size = size; this.lifetime = lifetime; this.age = 0;
+  }
+  update() { this.x += this.vx; this.y += this.vy; this.vx *= 0.92; this.vy *= 0.92; this.age++; }
+  draw(ctx) {
+    const a = 1 - this.age / this.lifetime;
+    const s = this.size * a;
+    ctx.globalAlpha = a;
+    ctx.fillStyle = this.color;
+    ctx.fillRect(this.x - s/2, this.y - s/2, s, s);
+    ctx.globalAlpha = 1;
+  }
+  get isDead() { return this.age >= this.lifetime; }
+}
+
+const ParticleSystem = {
+  particles: [],
+  spawnMuzzleFlash(x, y, angle) {
+    const cols = [C.white, C.yellow, C.orange];
+    for (let i = 0; i < 6; i++) {
+      const spread = (Math.random() - 0.5) * 0.5;
+      const spd = 3 + Math.random() * 3;
+      this.add(x, y, Math.cos(angle+spread)*spd, Math.sin(angle+spread)*spd,
+        cols[Math.floor(Math.random()*3)], 3+Math.random()*2, 8+Math.random()*4);
+    }
+  },
+  spawnEnemyDeath(x, y, cols) {
+    for (let i = 0; i < 16; i++) {
+      const a = Math.random() * Math.PI * 2, spd = 1 + Math.random() * 4;
+      this.add(x, y, Math.cos(a)*spd, Math.sin(a)*spd,
+        cols[Math.floor(Math.random()*cols.length)], 2+Math.random()*4, 20+Math.random()*15);
+    }
+  },
+  spawnHitSpark(x, y) {
+    for (let i = 0; i < 4; i++) {
+      const a = Math.random() * Math.PI * 2, spd = 2 + Math.random() * 3;
+      this.add(x, y, Math.cos(a)*spd, Math.sin(a)*spd, C.white, 3, 6+Math.random()*4);
+    }
+  },
+  spawnBloodTrail(x, y) {
+    for (let i = 0; i < 5; i++) {
+      const a = Math.random() * Math.PI * 2, spd = 1 + Math.random() * 2;
+      this.add(x, y, Math.cos(a)*spd, Math.sin(a)*spd, C.accent, 4, 15+Math.random()*10);
+    }
+  },
+  add(x,y,vx,vy,c,s,l) {
+    if (this.particles.length < 200) this.particles.push(new Particle(x,y,vx,vy,c,s,l));
+  },
+  update() {
+    this.particles.forEach(p => p.update());
+    this.particles = this.particles.filter(p => !p.isDead);
+  },
+  draw(ctx) { this.particles.forEach(p => p.draw(ctx)); }
+};
+
+// ============================================================
+// SECTION 6: BULLET CLASS
+// ============================================================
+class Bullet {
+  constructor(x, y, angle) {
+    this.x = x; this.y = y;
+    this.vx = Math.cos(angle) * BULLET_SPEED;
+    this.vy = Math.sin(angle) * BULLET_SPEED;
+    this.px = x; this.py = y;
+    this.radius = 3; this.lifetime = BULLET_LIFETIME; this.active = true;
+    this.angle = angle;
+  }
+  update() {
+    this.px = this.x; this.py = this.y;
+    this.x += this.vx; this.y += this.vy;
+    this.lifetime--;
+    if (this.lifetime <= 0 || this.x < 0 || this.x > CANVAS_W || this.y < 0 || this.y > CANVAS_H)
+      this.active = false;
+  }
+  draw(ctx) {
+    ctx.fillStyle = C.white;
+    ctx.fillRect(this.px - 1, this.py - 1, 2, 2);
+    ctx.fillStyle = C.cyan;
+    ctx.fillRect(this.x - 3, this.y - 3, 6, 6);
+  }
+}
+
+// ============================================================
+// SECTION 7: ENEMY CLASSES
+// ============================================================
+class Enemy {
+  constructor(x, y) {
+    this.x = x; this.y = y; this.angle = 0;
+    this.animState = 'walk'; this.animFrame = 0; this.animTimer = 0;
+    this.dead = false; this.contactCooldown = 0; this.birthTime = Date.now();
+  }
+  update(dt, px, py) {
+    if (this.dead) {
+      this.animTimer++;
+      if (this.animTimer >= ANIM_SPEED) {
+        this.animTimer = 0;
+        if (this.animFrame < DEATH_ANIM_FRAMES - 1) this.animFrame++;
+      }
+      return;
+    }
+    this.angle = Math.atan2(py - this.y, px - this.x);
+    this.x += Math.cos(this.angle) * this.speed * dt;
+    this.y += Math.sin(this.angle) * this.speed * dt;
+    this.animTimer++;
+    if (this.animTimer >= ANIM_SPEED) { this.animTimer = 0; this.animFrame = (this.animFrame + 1) % this.walkFrames.length; }
+    if (this.contactCooldown > 0) this.contactCooldown--;
+  }
+  takeDamage(amt) {
+    this.hp -= amt;
+    if (this.hp <= 0) this.die();
+  }
+  die() {
+    this.dead = true; this.animState = 'die'; this.animFrame = 0; this.animTimer = 0;
+    ParticleSystem.spawnEnemyDeath(this.x, this.y, this.deathColors);
+  }
+  draw(ctx) {
+    const frames = this.dead ? this.dieFrames : this.walkFrames;
+    const f = Math.min(this.animFrame, frames.length - 1);
+    drawSprite(ctx, frames[f], this.palette, this.x, this.y, this.scale, this.angle);
+  }
+  get isFullyDead() { return this.dead && this.animFrame >= DEATH_ANIM_FRAMES - 1; }
+}
+
+class GruntEnemy extends Enemy {
+  constructor(x, y) {
+    super(x, y);
+    this.hp = GRUNT_HP; this.speed = GRUNT_SPEED; this.scoreValue = GRUNT_SCORE;
+    this.damageAmount = GRUNT_DMG; this.radius = GRUNT_RADIUS; this.scale = GRUNT_SCALE;
+    this.palette = G_PAL; this.walkFrames = SPR_G_WALK; this.dieFrames = SPR_G_DIE;
+    this.deathColors = [C.gruntBody, C.gruntDark, C.accent];
+  }
+}
+
+class BruteEnemy extends Enemy {
+  constructor(x, y) {
+    super(x, y);
+    this.hp = BRUTE_HP; this.speed = BRUTE_SPEED; this.scoreValue = BRUTE_SCORE;
+    this.damageAmount = BRUTE_DMG; this.radius = BRUTE_RADIUS; this.scale = BRUTE_SCALE;
+    this.palette = B_PAL; this.walkFrames = SPR_B_WALK; this.dieFrames = SPR_B_DIE;
+    this.deathColors = [C.bruteBody, C.bruteDark, C.bruteLight];
+  }
+}
+
+class ScoutEnemy extends Enemy {
+  constructor(x, y) {
+    super(x, y);
+    this.hp = SCOUT_HP; this.speed = SCOUT_SPEED; this.scoreValue = SCOUT_SCORE;
+    this.damageAmount = SCOUT_DMG; this.radius = SCOUT_RADIUS; this.scale = SCOUT_SCALE;
+    this.palette = S_PAL; this.walkFrames = SPR_S_WALK; this.dieFrames = SPR_S_DIE;
+    this.deathColors = [C.scoutBody, C.scoutDark, C.scoutLight];
+  }
+  update(dt, px, py) {
+    if (!this.dead) {
+      const base = Math.atan2(py - this.y, px - this.x);
+      const t = (Date.now() - this.birthTime) / 1000;
+      this.angle = base + Math.sin(t * 3) * 0.35;
+    }
+    super.update(dt, px, py);
+  }
+}
+
+// ============================================================
+// SECTION 8: PLAYER CLASS
+// ============================================================
+class Player {
+  constructor(x, y) {
+    this.x = x; this.y = y; this.hp = PLAYER_MAX_HP; this.maxHp = PLAYER_MAX_HP;
+    this.speed = PLAYER_SPEED; this.angle = 0;
+    this.animState = 'idle'; this.animFrame = 0; this.animTimer = 0;
+    this.shootCooldown = 0; this.invincibleTimer = 0;
+    this.moving = false;
+  }
+  update(dt) {
+    let vx = 0, vy = 0;
+    if (Input.keys['ArrowUp'] || Input.keys['w']) vy = -1;
+    if (Input.keys['ArrowDown'] || Input.keys['s']) vy = 1;
+    if (Input.keys['ArrowLeft'] || Input.keys['a']) vx = -1;
+    if (Input.keys['ArrowRight'] || Input.keys['d']) vx = 1;
+    if (vx && vy) { vx *= 0.707; vy *= 0.707; }
+    this.x = Math.max(PLAYER_RADIUS, Math.min(CANVAS_W - PLAYER_RADIUS, this.x + vx * this.speed * dt));
+    this.y = Math.max(PLAYER_RADIUS, Math.min(CANVAS_H - PLAYER_RADIUS, this.y + vy * this.speed * dt));
+    this.moving = vx !== 0 || vy !== 0;
+    this.angle = Math.atan2(Input.mouseY - this.y, Input.mouseX - this.x);
+    this.animTimer++;
+    if (this.animTimer >= ANIM_SPEED) {
+      this.animTimer = 0;
+      if (this.moving) this.animFrame = (this.animFrame + 1) % SPR_P_WALK.length;
+      else this.animFrame = 0;
+    }
+    if (this.shootCooldown > 0) this.shootCooldown--;
+    if (this.invincibleTimer > 0) this.invincibleTimer--;
+    if (Input.mouseDown && this.shootCooldown === 0) this.shoot();
+  }
+  shoot() {
+    const tipX = this.x + Math.cos(this.angle) * 14;
+    const tipY = this.y + Math.sin(this.angle) * 14;
+    GS.bullets.push(new Bullet(tipX, tipY, this.angle));
+    ParticleSystem.spawnMuzzleFlash(tipX, tipY, this.angle);
+    this.shootCooldown = SHOOT_COOLDOWN;
+  }
+  takeDamage(amt) {
+    this.hp = Math.max(0, this.hp - amt);
+    this.invincibleTimer = 45;
+    ParticleSystem.spawnBloodTrail(this.x, this.y);
+  }
+  draw(ctx) {
+    const alpha = this.invincibleTimer > 0 ? (Math.floor(this.invincibleTimer / 4) % 2 === 0 ? 0.4 : 1) : 1;
+    ctx.globalAlpha = alpha;
+    const f = Math.min(this.animFrame, SPR_P_WALK.length - 1);
+    drawSprite(ctx, SPR_P_WALK[f], P_PAL, this.x, this.y, PLAYER_SCALE, this.angle);
+    ctx.globalAlpha = 1;
+  }
+  get isDead() { return this.hp <= 0; }
+}
+
+// ============================================================
+// SECTION 9: WAVE MANAGER
+// ============================================================
+class WaveManager {
+  constructor(levelData) {
+    this.waves = levelData.waves;
+    this.waveIndex = 0;
+    this.spawnQueue = [];
+    this.spawnTimer = 0;
+    this.enemiesKilledInWave = 0;
+    this.totalEnemiesInWave = 0;
+    this.done = false;
+    this._waveStarted = false;
+    this._loadWave(0);
+  }
+  _loadWave(idx) {
+    if (idx >= this.waves.length) { this.done = true; return; }
+    const w = this.waves[idx];
+    // Round-robin interleave enemy types
+    const buckets = w.enemies.map(e => Array(e.count).fill(e.type));
+    this.spawnQueue = [];
+    while (buckets.some(b => b.length > 0)) {
+      for (const b of buckets) { if (b.length) this.spawnQueue.push(b.shift()); }
+    }
+    this.totalEnemiesInWave = this.spawnQueue.length;
+    this.enemiesKilledInWave = 0;
+    this.spawnTimer = w.spawnDelay;
+    this._waveStarted = false;
+    this._currentWaveData = w;
+  }
+  update(enemies) {
+    if (this.done) return;
+    const w = this._currentWaveData;
+    // Count kills by watching enemy removals
+    const living = enemies.filter(e => !e.isFullyDead).length;
+    if (this.spawnQueue.length === 0) {
+      // Wait for all enemies to die
+      if (enemies.filter(e => !e.isFullyDead).length === 0) {
+        this.waveIndex++;
+        if (this.waveIndex >= this.waves.length) { this.done = true; return; }
+        this._loadWave(this.waveIndex);
+      }
+      return;
+    }
+    this.spawnTimer--;
+    if (this.spawnTimer <= 0) {
+      const type = this.spawnQueue.shift();
+      const e = this._spawnEnemy(type);
+      enemies.push(e);
+      this.spawnTimer = w.spawnInterval;
+    }
+  }
+  _spawnEnemy(type) {
+    const edge = Math.floor(Math.random() * 4);
+    let x, y;
+    if (edge === 0)      { x = 30 + Math.random() * (CANVAS_W - 60); y = -20; }
+    else if (edge === 1) { x = CANVAS_W + 20; y = 30 + Math.random() * (CANVAS_H - 60); }
+    else if (edge === 2) { x = 30 + Math.random() * (CANVAS_W - 60); y = CANVAS_H + 20; }
+    else                 { x = -20; y = 30 + Math.random() * (CANVAS_H - 60); }
+    if (type === 'grunt') return new GruntEnemy(x, y);
+    if (type === 'brute') return new BruteEnemy(x, y);
+    return new ScoutEnemy(x, y);
+  }
+  get currentWaveNumber() { return this.waveIndex + 1; }
+  get totalWaves() { return this.waves.length; }
+  get waveProgress() {
+    if (this.totalEnemiesInWave === 0) return 1;
+    const spawned = this.totalEnemiesInWave - this.spawnQueue.length;
+    return spawned / this.totalEnemiesInWave;
+  }
+}
+
+// ============================================================
+// SECTION 10: LEVEL DATA
+// ============================================================
+const LEVEL_DATA = [
+  { title: 'SECTOR 1', waves: [
+    { enemies: [{type:'grunt',count:5}], spawnInterval:90, spawnDelay:120 },
+    { enemies: [{type:'grunt',count:8}], spawnInterval:75, spawnDelay:60 },
+    { enemies: [{type:'grunt',count:10}], spawnInterval:60, spawnDelay:60 },
+  ]},
+  { title: 'SECTOR 2', waves: [
+    { enemies: [{type:'grunt',count:5},{type:'scout',count:3}], spawnInterval:75, spawnDelay:90 },
+    { enemies: [{type:'grunt',count:8},{type:'scout',count:5}], spawnInterval:60, spawnDelay:60 },
+    { enemies: [{type:'scout',count:10}], spawnInterval:45, spawnDelay:60 },
+    { enemies: [{type:'grunt',count:6},{type:'scout',count:4}], spawnInterval:55, spawnDelay:45 },
+  ]},
+  { title: 'SECTOR 3', waves: [
+    { enemies: [{type:'grunt',count:6},{type:'brute',count:2}], spawnInterval:70, spawnDelay:90 },
+    { enemies: [{type:'grunt',count:5},{type:'scout',count:4},{type:'brute',count:2}], spawnInterval:60, spawnDelay:60 },
+    { enemies: [{type:'brute',count:4},{type:'scout',count:6}], spawnInterval:50, spawnDelay:60 },
+    { enemies: [{type:'grunt',count:8},{type:'brute',count:3}], spawnInterval:45, spawnDelay:45 },
+  ]},
+  { title: 'SECTOR 4', waves: [
+    { enemies: [{type:'grunt',count:10},{type:'scout',count:5},{type:'brute',count:3}], spawnInterval:50, spawnDelay:60 },
+    { enemies: [{type:'scout',count:12},{type:'brute',count:4}], spawnInterval:40, spawnDelay:45 },
+    { enemies: [{type:'grunt',count:8},{type:'scout',count:8},{type:'brute',count:4}], spawnInterval:35, spawnDelay:45 },
+    { enemies: [{type:'grunt',count:6},{type:'scout',count:6},{type:'brute',count:6}], spawnInterval:30, spawnDelay:30 },
+    { enemies: [{type:'grunt',count:15},{type:'brute',count:6}], spawnInterval:25, spawnDelay:30 },
+  ]},
+  { title: 'SECTOR 5 — FINAL', waves: [
+    { enemies: [{type:'grunt',count:12},{type:'scout',count:8},{type:'brute',count:6}], spawnInterval:30, spawnDelay:60 },
+    { enemies: [{type:'grunt',count:10},{type:'scout',count:12},{type:'brute',count:6}], spawnInterval:25, spawnDelay:45 },
+    { enemies: [{type:'scout',count:15},{type:'brute',count:8}], spawnInterval:20, spawnDelay:30 },
+    { enemies: [{type:'grunt',count:20},{type:'scout',count:10},{type:'brute',count:8}], spawnInterval:18, spawnDelay:30 },
+    { enemies: [{type:'grunt',count:8},{type:'scout',count:8},{type:'brute',count:10}], spawnInterval:15, spawnDelay:20 },
+  ]},
+];
+
+// ============================================================
+// SECTION 11: GAME STATE MACHINE
+// ============================================================
+let menuTick = 0;
+let floorDebris = [];
+let totalEnemiesDefeated = 0;
+let won = false;
+
+const GS = {
+  state: STATES.MENU,
+  score: 0,
+  level: 1,
+  transitionTimer: 0,
+  player: null,
+  enemies: [],
+  bullets: [],
+};
+
+function dist(a, b) {
+  const dx = a.x - b.x, dy = a.y - b.y;
+  return Math.sqrt(dx*dx + dy*dy);
+}
+
+function setState(s) {
+  GS.state = s;
+  if (s === STATES.LEVEL_COMPLETE) {
+    GS.transitionTimer = 90;
+    for (let i = 0; i < 30; i++) {
+      const a = Math.random() * Math.PI * 2, spd = 1 + Math.random() * 4;
+      ParticleSystem.add(400 + (Math.random()-0.5)*200, 300 + (Math.random()-0.5)*150,
+        Math.cos(a)*spd, Math.sin(a)*spd,
+        [C.yellow, C.accent, C.cyan][Math.floor(Math.random()*3)],
+        3 + Math.random()*3, 60 + Math.random()*40);
+    }
+  }
+}
+
+function startLevel(lvl) {
+  GS.level = lvl;
+  GS.enemies = [];
+  GS.bullets = [];
+  ParticleSystem.particles = [];
+  if (!GS.player || lvl === 1) {
+    GS.player = new Player(CANVAS_W / 2, CANVAS_H / 2);
+  } else {
+    GS.player.hp = Math.min(GS.player.maxHp, GS.player.hp + 30);
+    GS.player.x = CANVAS_W / 2;
+    GS.player.y = CANVAS_H / 2;
+  }
+  GS.waveManager = new WaveManager(LEVEL_DATA[lvl - 1]);
+  GS.state = STATES.PLAYING;
+}
+
+function resetGame() {
+  GS.score = 0; GS.level = 1; GS.player = null;
+  GS.enemies = []; GS.bullets = [];
+  ParticleSystem.particles = [];
+  totalEnemiesDefeated = 0; won = false;
+}
+
+// ============================================================
+// SECTION 12: SCREEN RENDERERS
+// ============================================================
+function renderMenu(ctx) {
+  // Background
+  renderBackground(ctx);
+  // Floating title
+  const ty = 130 + Math.sin(menuTick * 0.03) * 6;
+  ctx.font = 'bold 40px "Courier New", monospace';
+  ctx.fillStyle = C.accent;
+  ctx.textAlign = 'center';
+  ctx.fillText('RECON: ZERO DAY', CANVAS_W/2, ty);
+  // Scanlines on title
+  ctx.save();
+  ctx.globalAlpha = 0.12;
+  ctx.fillStyle = '#000';
+  for (let y = ty - 44; y < ty + 8; y += 4) ctx.fillRect(CANVAS_W/2 - 200, y, 400, 2);
+  ctx.restore();
+  ctx.font = '14px "Courier New", monospace';
+  ctx.fillStyle = C.cyan;
+  ctx.fillText('TOP-DOWN SHOOTER', CANVAS_W/2, ty + 32);
+  // Instructions panel
+  const pw = 280, ph = 130, px2 = CANVAS_W/2 - pw/2, py2 = 220;
+  ctx.fillStyle = C.panel;
+  ctx.fillRect(px2, py2, pw, ph);
+  ctx.strokeStyle = C.border;
+  ctx.lineWidth = 2;
+  ctx.strokeRect(px2, py2, pw, ph);
+  ctx.font = '13px "Courier New", monospace';
+  ctx.fillStyle = C.white;
+  ctx.textAlign = 'left';
+  const lines = ['ARROWS / WASD — MOVE','MOUSE — AIM','CLICK — SHOOT','SURVIVE ALL WAVES'];
+  lines.forEach((l, i) => ctx.fillText(l, px2 + 18, py2 + 28 + i * 26));
+  // Blink prompt
+  if (Math.floor(menuTick / 30) % 2 === 0) {
+    ctx.font = 'bold 16px "Courier New", monospace';
+    ctx.fillStyle = C.yellow;
+    ctx.textAlign = 'center';
+    ctx.fillText('[ CLICK TO PLAY ]', CANVAS_W/2, 390);
+  }
+  ctx.font = '11px "Courier New", monospace';
+  ctx.fillStyle = C.border;
+  ctx.fillText('v1.0', CANVAS_W/2, 590);
+}
+
+function renderLevelComplete(ctx) {
+  renderBackground(ctx);
+  ParticleSystem.draw(ctx);
+  ctx.fillStyle = 'rgba(26,26,46,0.82)';
+  ctx.fillRect(0, 0, CANVAS_W, CANVAS_H);
+  ctx.textAlign = 'center';
+  ctx.font = 'bold 34px "Courier New", monospace';
+  ctx.fillStyle = C.yellow;
+  ctx.fillText('SECTOR CLEAR', CANVAS_W/2, 230);
+  ctx.font = '18px "Courier New", monospace';
+  ctx.fillStyle = C.white;
+  ctx.fillText('SCORE: ' + GS.score, CANVAS_W/2, 285);
+  ctx.fillStyle = C.cyan;
+  ctx.font = '15px "Courier New", monospace';
+  ctx.fillText('+30 HP RESTORED', CANVAS_W/2, 318);
+  const nextLvl = GS.level + 1;
+  if (nextLvl <= LEVEL_DATA.length) {
+    ctx.fillStyle = C.accent;
+    ctx.fillText('NEXT: ' + LEVEL_DATA[nextLvl-1].title, CANVAS_W/2, 350);
+  }
+  if (Math.floor(GS.transitionTimer / 15) % 2 === 0 || GS.transitionTimer <= 0) {
+    ctx.fillStyle = C.white;
+    ctx.fillText('PRESS ANY KEY OR CLICK TO CONTINUE', CANVAS_W/2, 400);
+  }
+}
+
+function renderGameOver(ctx) {
+  renderBackground(ctx);
+  ctx.fillStyle = 'rgba(26,26,46,0.85)';
+  ctx.fillRect(0, 0, CANVAS_W, CANVAS_H);
+  ctx.textAlign = 'center';
+  ctx.font = 'bold 44px "Courier New", monospace';
+  ctx.fillStyle = won ? C.yellow : C.accent;
+  ctx.fillText(won ? 'MISSION COMPLETE' : 'GAME OVER', CANVAS_W/2, 210);
+  ctx.font = '22px "Courier New", monospace';
+  ctx.fillStyle = C.white;
+  ctx.fillText('FINAL SCORE: ' + GS.score, CANVAS_W/2, 275);
+  ctx.font = '16px "Courier New", monospace';
+  ctx.fillStyle = C.cyan;
+  ctx.fillText('ENEMIES DEFEATED: ' + totalEnemiesDefeated, CANVAS_W/2, 315);
+  if (Math.floor(menuTick / 30) % 2 === 0) {
+    ctx.fillStyle = C.white;
+    ctx.fillText('CLICK TO RETURN TO MENU', CANVAS_W/2, 380);
+  }
+}
+
+function renderHUD(ctx) {
+  const p = GS.player;
+  // Health bar
+  const bx = 16, by = CANVAS_H - 30, bw = 130, bh = 14;
+  ctx.fillStyle = C.border;
+  ctx.fillRect(bx - 2, by - 2, bw + 4, bh + 4);
+  ctx.fillStyle = '#222';
+  ctx.fillRect(bx, by, bw, bh);
+  const hpRatio = p.hp / p.maxHp;
+  ctx.fillStyle = hpRatio > 0.6 ? '#4a7c59' : hpRatio > 0.3 ? C.yellow : C.accent;
+  ctx.fillRect(bx, by, Math.floor(bw * hpRatio), bh);
+  ctx.font = '11px "Courier New", monospace';
+  ctx.fillStyle = C.white;
+  ctx.textAlign = 'left';
+  ctx.fillText('HP ' + p.hp + '/' + p.maxHp, bx, by - 4);
+  // Score
+  ctx.textAlign = 'right';
+  ctx.font = '14px "Courier New", monospace';
+  ctx.fillStyle = C.accent;
+  ctx.fillText('SCORE: ' + String(GS.score).padStart(6,'0'), CANVAS_W - 14, 22);
+  // Level / wave
+  ctx.textAlign = 'left';
+  ctx.fillStyle = C.cyan;
+  ctx.fillText(LEVEL_DATA[GS.level-1].title, 14, 22);
+  ctx.fillStyle = C.white;
+  ctx.font = '12px "Courier New", monospace';
+  ctx.fillText('WAVE ' + GS.waveManager.currentWaveNumber + ' / ' + GS.waveManager.totalWaves, 14, 40);
+  // Wave progress bar
+  const wbx = CANVAS_W/2 - 80, wby = 10, wbw = 160, wbh = 6;
+  ctx.fillStyle = C.border;
+  ctx.fillRect(wbx-1, wby-1, wbw+2, wbh+2);
+  ctx.fillStyle = '#222';
+  ctx.fillRect(wbx, wby, wbw, wbh);
+  ctx.fillStyle = C.cyan;
+  ctx.fillRect(wbx, wby, Math.floor(wbw * GS.waveManager.waveProgress), wbh);
+  // Crosshair
+  const mx = Input.mouseX, my = Input.mouseY;
+  ctx.strokeStyle = C.white;
+  ctx.lineWidth = 1;
+  const arm = 7, gap = 3;
+  ctx.beginPath();
+  ctx.moveTo(mx - arm - gap, my); ctx.lineTo(mx - gap, my);
+  ctx.moveTo(mx + gap, my); ctx.lineTo(mx + arm + gap, my);
+  ctx.moveTo(mx, my - arm - gap); ctx.lineTo(mx, my - gap);
+  ctx.moveTo(mx, my + gap); ctx.lineTo(mx, my + arm + gap);
+  ctx.stroke();
+  ctx.fillStyle = C.white;
+  ctx.fillRect(mx - 1, my - 1, 2, 2);
+}
+
+function renderBackground(ctx) {
+  ctx.fillStyle = C.bg;
+  ctx.fillRect(0, 0, CANVAS_W, CANVAS_H);
+  ctx.globalAlpha = 0.25;
+  ctx.strokeStyle = C.border;
+  ctx.lineWidth = 1;
+  for (let x = 0; x <= CANVAS_W; x += 40) {
+    ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, CANVAS_H); ctx.stroke();
+  }
+  for (let y = 0; y <= CANVAS_H; y += 40) {
+    ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(CANVAS_W, y); ctx.stroke();
+  }
+  ctx.globalAlpha = 1;
+  // Floor debris
+  ctx.fillStyle = C.panel;
+  for (const d of floorDebris) ctx.fillRect(d.x, d.y, d.w, d.h);
+}
+
+// ============================================================
+// SECTION 13: MAIN LOOP
+// ============================================================
+function update(dt) {
+  menuTick++;
+  if (GS.state === STATES.MENU) {
+    if (Input.mouseJustDown) { resetGame(); startLevel(1); }
+    return;
+  }
+  if (GS.state === STATES.GAME_OVER) {
+    if (Input.mouseJustDown) setState(STATES.MENU);
+    return;
+  }
+  if (GS.state === STATES.LEVEL_COMPLETE) {
+    GS.transitionTimer--;
+    ParticleSystem.update();
+    const anyKey = Object.values(Input.keys).some(Boolean);
+    if ((GS.transitionTimer <= 0 && Input.mouseJustDown) || anyKey) {
+      const next = GS.level + 1;
+      if (next <= LEVEL_DATA.length) startLevel(next);
+      else { won = true; setState(STATES.GAME_OVER); }
+    }
+    return;
+  }
+  // PLAYING
+  GS.player.update(dt);
+  GS.waveManager.update(GS.enemies);
+  GS.enemies.forEach(e => e.update(dt, GS.player.x, GS.player.y));
+  GS.bullets.forEach(b => b.update());
+  GS.bullets = GS.bullets.filter(b => b.active);
+  // Remove fully dead enemies and tally score
+  GS.enemies = GS.enemies.filter(e => {
+    if (e.isFullyDead) { GS.score += e.scoreValue; totalEnemiesDefeated++; return false; }
+    return true;
+  });
+  // Bullet vs enemy collision
+  for (const b of GS.bullets) {
+    for (const e of GS.enemies) {
+      if (!e.dead && dist(b, e) < b.radius + e.radius) {
+        b.active = false;
+        e.takeDamage(BULLET_DAMAGE);
+        ParticleSystem.spawnHitSpark(b.x, b.y);
+        break;
+      }
+    }
+  }
+  // Enemy vs player collision
+  if (GS.player.invincibleTimer === 0) {
+    for (const e of GS.enemies) {
+      if (!e.dead && e.contactCooldown === 0 && dist(e, GS.player) < e.radius + PLAYER_RADIUS) {
+        GS.player.takeDamage(e.damageAmount);
+        e.contactCooldown = 30;
+        break;
+      }
+    }
+  }
+  ParticleSystem.update();
+  if (GS.player.isDead) { setState(STATES.GAME_OVER); return; }
+  if (GS.waveManager.done && GS.enemies.length === 0) {
+    if (GS.level >= LEVEL_DATA.length) { won = true; setState(STATES.GAME_OVER); }
+    else setState(STATES.LEVEL_COMPLETE);
+  }
+}
+
+function render(ctx) {
+  if (GS.state === STATES.MENU) { renderMenu(ctx); return; }
+  if (GS.state === STATES.GAME_OVER) { renderGameOver(ctx); return; }
+  if (GS.state === STATES.LEVEL_COMPLETE) { renderLevelComplete(ctx); return; }
+  // PLAYING
+  renderBackground(ctx);
+  // Shadows
+  ctx.globalAlpha = 0.25;
+  ctx.fillStyle = '#000';
+  for (const e of GS.enemies) { ctx.beginPath(); ctx.ellipse(e.x, e.y+8, e.radius*0.8, e.radius*0.4, 0, 0, Math.PI*2); ctx.fill(); }
+  ctx.beginPath(); ctx.ellipse(GS.player.x, GS.player.y+8, 10, 5, 0, 0, Math.PI*2); ctx.fill();
+  ctx.globalAlpha = 1;
+  GS.enemies.forEach(e => e.draw(ctx));
+  GS.player.draw(ctx);
+  GS.bullets.forEach(b => b.draw(ctx));
+  ParticleSystem.draw(ctx);
+  renderHUD(ctx);
+}
+
+let lastTime = 0;
+function gameLoop(ts) {
+  const dt = Math.min((ts - lastTime) / 16.667, 3);
+  lastTime = ts;
+  const canvas = document.getElementById('gameCanvas');
+  const ctx = canvas.getContext('2d');
+  update(dt);
+  render(ctx);
+  Input.flush();
+  requestAnimationFrame(gameLoop);
+}
+
+// ============================================================
+// SECTION 14: BOOTSTRAP
+// ============================================================
+(function init() {
+  // Generate floor debris once
+  for (let i = 0; i < 40; i++) {
+    floorDebris.push({
+      x: Math.random() * CANVAS_W, y: Math.random() * CANVAS_H,
+      w: 2 + Math.random() * 3, h: 2 + Math.random() * 3
+    });
+  }
+  Input.init();
+  requestAnimationFrame(ts => { lastTime = ts; requestAnimationFrame(gameLoop); });
+})();
+</script>
+</body>
+</html>
